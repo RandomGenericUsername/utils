@@ -13,7 +13,8 @@ Common issues and solutions for the `dotfiles_package_manager` module.
 5. [Search Issues](#search-issues)
 6. [Factory Issues](#factory-issues)
 7. [Performance Issues](#performance-issues)
-8. [Debugging Tips](#debugging-tips)
+8. [Output Capture Issues](#output-capture-issues)
+9. [Debugging Tips](#debugging-tips)
 
 ---
 
@@ -598,6 +599,112 @@ PackageManagerError: No package manager available
            search_cache[key] = pm.search(query, limit)
        return search_cache[key]
    ```
+
+---
+
+## Output Capture Issues
+
+### Issue: Failed packages not detected (fail_on_package_error not working)
+
+**Symptoms:**
+- Package installation fails with messages like:
+  ```
+  No match for argument: ninja
+  No match for argument: wayland
+  Error: Unable to find a match: ninja wayland
+  ```
+- But `result.packages_failed` is empty
+- `fail_on_package_error = true` doesn't stop the pipeline
+- All packages are reported as "Installed" even though some failed
+
+**Diagnosis:**
+Add debug output to check what's being captured:
+```python
+result = pm._run_command(command, check=False)
+print(f"returncode: {result.returncode}")
+print(f"stdout length: {len(result.stdout or '')}")
+print(f"stderr length: {len(result.stderr or '')}")
+```
+
+If stdout and stderr are empty (length=0) despite visible output in the terminal,
+the output is going directly to the TTY and not being captured by subprocess.
+
+**Root Cause:**
+Package managers like `dnf` use progress bars and TTY detection. When they detect
+a TTY, they may write output directly to the terminal, bypassing subprocess
+capture. This is especially common when:
+1. Running with `sudo` (which may allocate a pseudo-TTY)
+2. The `TERM` environment variable is set to a terminal type
+3. Package manager detects an interactive session
+
+**Solutions:**
+
+1. **Set TERM=dumb to disable TTY detection:**
+   ```python
+   import os
+   import subprocess
+
+   env = os.environ.copy()
+   env["TERM"] = "dumb"
+
+   result = subprocess.run(
+       command,
+       stdout=subprocess.PIPE,
+       stderr=subprocess.PIPE,
+       stdin=subprocess.DEVNULL,
+       text=True,
+       env=env,
+   )
+   ```
+
+2. **Use explicit PIPE instead of capture_output:**
+   ```python
+   # Instead of:
+   result = subprocess.run(command, capture_output=True, text=True)
+
+   # Use:
+   result = subprocess.run(
+       command,
+       stdout=subprocess.PIPE,
+       stderr=subprocess.PIPE,
+       stdin=subprocess.DEVNULL,
+       text=True,
+   )
+   ```
+
+3. **Set stdin=DEVNULL to prevent TTY allocation:**
+   This prevents the subprocess from inheriting stdin and potentially
+   allocating a pseudo-TTY.
+
+**Fixed Implementation:**
+The package manager base classes now include these fixes:
+```python
+def _run_command(self, command, check=True, timeout=300, capture_output=True):
+    env = os.environ.copy()
+    env["TERM"] = "dumb"
+
+    if capture_output:
+        return subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
+            text=True,
+            check=check,
+            timeout=timeout,
+            env=env,
+        )
+    ...
+```
+
+**Verification:**
+After applying the fix, you should see:
+```
+returncode: 1
+stdout length: 2790
+stderr length: 1509
+failed_packages: ['ninja', 'wayland', 'wayland-protocols', 'ffmpeg']
+```
 
 ---
 

@@ -1,0 +1,10 @@
+*.pyc
+__pycache__/
+
+# Test artifacts
+/htmlcov/
+.coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+

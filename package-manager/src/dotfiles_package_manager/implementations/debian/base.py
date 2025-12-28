@@ -105,38 +105,58 @@ class DebianPackageManagerBase(PackageManager, ABC):
             dependencies=dependencies,
         )
 
+    def check_lock(self):
+        """Check for APT/dpkg locks.
+
+        Returns:
+            LockCheckResult with lock status and details
+        """
+        from dotfiles_package_manager.core.lock import check_apt_lock
+        return check_apt_lock()
+
     def _run_command(
         self,
         command: list[str],
-        check: bool = True,
-        timeout: int = 300,
         capture_output: bool = True,
+        check: bool = True,
+        timeout: int | None = None,
     ) -> subprocess.CompletedProcess:
         """
         Run a command and return the result.
 
         Args:
             command: Command and arguments to run
-            check: Whether to raise on non-zero exit
-            timeout: Command timeout in seconds
             capture_output: Whether to capture stdout/stderr
+            check: Whether to raise on non-zero exit
+            timeout: Command timeout in seconds (None for no timeout)
 
         Returns:
             CompletedProcess instance
+
+        Raises:
+            PackageManagerTimeoutError: If command times out
         """
-        # If command starts with sudo, don't capture to allow password input
-        if command and command[0] == "sudo":
-            return subprocess.run(
-                command,
-                text=True,
-                check=check,
+        try:
+            # If command starts with sudo, don't capture to allow password input
+            if command and command[0] == "sudo":
+                return subprocess.run(
+                    command,
+                    text=True,
+                    check=check,
+                    timeout=timeout,
+                )
+            else:
+                return subprocess.run(
+                    command,
+                    capture_output=capture_output,
+                    text=True,
+                    check=check,
+                    timeout=timeout,
+                )
+        except subprocess.TimeoutExpired as e:
+            from dotfiles_package_manager.core.base import PackageManagerTimeoutError
+            raise PackageManagerTimeoutError(
+                f"Command timed out after {timeout} seconds: {' '.join(command)}",
+                command=" ".join(command),
                 timeout=timeout,
-            )
-        else:
-            return subprocess.run(
-                command,
-                capture_output=capture_output,
-                text=True,
-                check=check,
-                timeout=timeout,
-            )
+            ) from e

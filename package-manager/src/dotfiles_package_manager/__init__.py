@@ -4,6 +4,8 @@ from dotfiles_package_manager.core.base import (
     PackageInfo,
     PackageManager,
     PackageManagerError,
+    PackageManagerTimeoutError,
+    PackageManagerLockError,
 )
 from dotfiles_package_manager.core.factory import (
     PackageManagerFactory,
@@ -19,6 +21,8 @@ from dotfiles_package_manager.core.types import (
 __all__ = [
     "PackageManager",
     "PackageManagerError",
+    "PackageManagerTimeoutError",
+    "PackageManagerLockError",
     "PackageInfo",
     "PackageManagerFactory",
     "PackageManagerType",

@@ -34,6 +34,33 @@ class PackageInstallationError(PackageManagerError):
     pass
 
 
+class PackageManagerTimeoutError(PackageManagerError):
+    """Raised when a package manager command times out."""
+
+    def __init__(
+        self,
+        message: str,
+        command: str | None = None,
+        timeout: int | None = None,
+    ):
+        super().__init__(message, command)
+        self.timeout = timeout
+
+
+class PackageManagerLockError(PackageManagerError):
+    """Raised when the package manager database is locked."""
+
+    def __init__(
+        self,
+        message: str,
+        lock_file: str | None = None,
+        is_stale: bool = False,
+    ):
+        super().__init__(message)
+        self.lock_file = lock_file
+        self.is_stale = is_stale
+
+
 class PackageManager(ABC):
     """Abstract base class for package managers."""
 
@@ -64,7 +91,10 @@ class PackageManager(ABC):
 
     @abstractmethod
     def install(
-        self, packages: list[str], update_system: bool = False
+        self,
+        packages: list[str],
+        update_system: bool = False,
+        timeout: int | None = None,
     ) -> InstallResult:
         """
         Install packages.
@@ -72,6 +102,7 @@ class PackageManager(ABC):
         Args:
             packages: List of package names to install
             update_system: Whether to update system before installing
+            timeout: Command timeout in seconds (None uses implementation default)
 
         Returns:
             InstallResult with installation details
@@ -198,9 +229,10 @@ class PackageManager(ABC):
                 )
             return result
         except subprocess.TimeoutExpired as e:
-            raise PackageManagerError(
+            raise PackageManagerTimeoutError(
                 f"Command timed out after {timeout}s: {' '.join(command)}",
                 command=" ".join(command),
+                timeout=timeout,
             ) from e
         except subprocess.CalledProcessError as e:
             raise PackageManagerError(

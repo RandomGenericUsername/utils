@@ -13,10 +13,12 @@ BaseException
 └── Exception
     └── PackageManagerError (base for all library exceptions)
         ├── PackageNotFoundError
-        └── PackageInstallationError
+        ├── PackageInstallationError
+        ├── PackageManagerTimeoutError
+        └── PackageManagerLockError
 ```
 
-**Source**: `src/dotfiles_package_manager/core/base.py` (lines 11-34)
+**Source**: `src/dotfiles_package_manager/core/base.py` (lines 11-62)
 
 ---
 
@@ -29,7 +31,7 @@ The `_run_command()` method catches and wraps these exceptions:
 | Original Exception | Wrapped As | When |
 |-------------------|------------|------|
 | `subprocess.CalledProcessError` | `PackageManagerError` | Command returns non-zero exit code |
-| `subprocess.TimeoutExpired` | `PackageManagerError` | Command exceeds timeout |
+| `subprocess.TimeoutExpired` | `PackageManagerTimeoutError` | Command exceeds timeout |
 | `FileNotFoundError` (in `_run_command`) | `PackageManagerError` | Executable not found during command run |
 
 **Source**: `src/dotfiles_package_manager/core/base.py::_run_command` (lines 200-215)
@@ -213,9 +215,91 @@ The following tests verify that subprocess exceptions propagate correctly:
 
 ---
 
+## New Exception Types (Phase 3-4)
+
+### PackageManagerTimeoutError
+
+Raised when a package manager command times out.
+
+**Attributes:**
+- `message` (str): Error description
+- `command` (str | None): Command that timed out
+- `timeout` (int | None): Timeout value in seconds
+
+**Example:**
+```python
+from dotfiles_package_manager import PackageManagerTimeoutError
+
+try:
+    result = pm.install(["vim"], timeout=60)
+except PackageManagerTimeoutError as e:
+    print(f"Command timed out after {e.timeout}s: {e.command}")
+```
+
+### PackageManagerLockError
+
+Raised when the package manager database is locked.
+
+**Attributes:**
+- `message` (str): Error description
+- `lock_file` (str | None): Path to the lock file
+- `is_stale` (bool): Whether the lock is stale (can be safely removed)
+
+**Example:**
+```python
+from dotfiles_package_manager import PackageManagerLockError
+
+try:
+    result = pm.install(["vim"])
+except PackageManagerLockError as e:
+    if e.is_stale:
+        print(f"Remove stale lock: sudo rm {e.lock_file}")
+    else:
+        print(f"Package manager is locked by another process")
+```
+
+---
+
+## Timeout Handling
+
+The `install()` method automatically catches timeout exceptions and converts them to graceful failures:
+
+```python
+result = pm.install(["vim"], timeout=600)
+
+if not result.success:
+    if "timeout" in result.error_message.lower():
+        print("Installation timed out. Consider increasing timeout.")
+    print(f"Failed packages: {result.packages_failed}")
+```
+
+---
+
+## Lock Detection
+
+Before attempting installation, the package manager checks for locks:
+
+```python
+from dotfiles_package_manager import PackageManagerLockError
+
+try:
+    result = pm.install(["vim"])
+except PackageManagerLockError as e:
+    if e.is_stale:
+        print(f"Stale lock detected at {e.lock_file}")
+        print(f"Safe to remove with: sudo rm {e.lock_file}")
+    else:
+        print("Package manager is currently in use")
+```
+
+See [Lock Detection Guide](LockDetection.md) for more details.
+
+---
+
 ## Related Documentation
 
 - [Quick Start Guide](QuickStart.md)
+- [Lock Detection Guide](LockDetection.md)
 - [Exception Propagation Reference](../reference/ExceptionPropagation.md)
 - [Types Reference](../api/Types.md)
 

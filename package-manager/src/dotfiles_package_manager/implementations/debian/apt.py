@@ -3,7 +3,11 @@
 import shutil
 from pathlib import Path
 
-from dotfiles_package_manager.core.base import PackageManagerError
+from dotfiles_package_manager.core.base import (
+    PackageManagerError,
+    PackageManagerTimeoutError,
+    PackageManagerLockError,
+)
 from dotfiles_package_manager.core.types import (
     InstallResult,
     PackageInfo,
@@ -28,19 +32,40 @@ class AptPackageManager(DebianPackageManagerBase):
         return Path(executable) if executable else None
 
     def install(
-        self, packages: list[str], update_system: bool = False
+        self,
+        packages: list[str],
+        update_system: bool = False,
+        timeout: int | None = None,
     ) -> InstallResult:
-        """Install packages using apt."""
+        """Install packages using apt.
+
+        Args:
+            packages: List of package names to install
+            update_system: Whether to perform system upgrade first
+            timeout: Command timeout in seconds (None for no timeout)
+
+        Returns:
+            InstallResult with success status and package lists
+        """
         if not packages:
             return InstallResult(
                 success=True, packages_installed=[], packages_failed=[]
+            )
+
+        # Check for lock file before attempting installation
+        lock_result = self.check_lock()
+        if lock_result.is_locked:
+            raise PackageManagerLockError(
+                lock_result.message,
+                lock_file=str(lock_result.lock_file) if lock_result.lock_file else None,
+                is_stale=lock_result.is_stale,
             )
 
         # Update package lists if requested
         if update_system:
             try:
                 update_cmd = ["sudo", str(self.executable_path), "update"]
-                self._run_command(update_cmd, check=True)
+                self._run_command(update_cmd, check=True, timeout=timeout)
             except Exception as e:
                 return InstallResult(
                     success=False,
@@ -54,7 +79,7 @@ class AptPackageManager(DebianPackageManagerBase):
         command.extend(packages)
 
         try:
-            result = self._run_command(command, check=False)
+            result = self._run_command(command, check=False, timeout=timeout)
 
             if result.returncode == 0:
                 return InstallResult(
@@ -80,6 +105,14 @@ class AptPackageManager(DebianPackageManagerBase):
                     error_message=result.stderr,
                 )
 
+        except PackageManagerTimeoutError as e:
+            return InstallResult(
+                success=False,
+                packages_installed=[],
+                packages_failed=packages.copy(),
+                error_message=f"Installation timed out after {e.timeout} seconds. "
+                              f"Consider increasing install_timeout in dotfiles.toml",
+            )
         except PackageManagerError as e:
             return InstallResult(
                 success=False,

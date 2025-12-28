@@ -121,46 +121,66 @@ class RedHatPackageManagerBase(PackageManager, ABC):
             dependencies=dependencies,
         )
 
+    def check_lock(self):
+        """Check for DNF/YUM locks.
+
+        Returns:
+            LockCheckResult with lock status and details
+        """
+        from dotfiles_package_manager.core.lock import check_dnf_lock
+        return check_dnf_lock()
+
     def _run_command(
         self,
         command: list[str],
-        check: bool = True,
-        timeout: int | None = 300,
         capture_output: bool = True,
+        check: bool = True,
+        timeout: int | None = None,
     ) -> subprocess.CompletedProcess:
         """
         Run a command and return the result.
 
         Args:
             command: Command and arguments to run
-            check: Whether to raise on non-zero exit
-            timeout: Command timeout in seconds
             capture_output: Whether to capture stdout/stderr
+            check: Whether to raise on non-zero exit
+            timeout: Command timeout in seconds (None for no timeout)
 
         Returns:
             CompletedProcess instance
-        """
-        # Set TERM=dumb to prevent progress bars and TTY detection
-        # that interfere with output capture
-        env = os.environ.copy()
-        env["TERM"] = "dumb"
 
-        if capture_output:
-            return subprocess.run(
-                command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                stdin=subprocess.DEVNULL,
-                text=True,
-                check=check,
+        Raises:
+            PackageManagerTimeoutError: If command times out
+        """
+        try:
+            # Set TERM=dumb to prevent progress bars and TTY detection
+            # that interfere with output capture
+            env = os.environ.copy()
+            env["TERM"] = "dumb"
+
+            if capture_output:
+                return subprocess.run(
+                    command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    stdin=subprocess.DEVNULL,
+                    text=True,
+                    check=check,
+                    timeout=timeout,
+                    env=env,
+                )
+            else:
+                return subprocess.run(
+                    command,
+                    text=True,
+                    check=check,
+                    timeout=timeout,
+                    env=env,
+                )
+        except subprocess.TimeoutExpired as e:
+            from dotfiles_package_manager.core.base import PackageManagerTimeoutError
+            raise PackageManagerTimeoutError(
+                f"Command timed out after {timeout} seconds: {' '.join(command)}",
+                command=" ".join(command),
                 timeout=timeout,
-                env=env,
-            )
-        else:
-            return subprocess.run(
-                command,
-                text=True,
-                check=check,
-                timeout=timeout,
-                env=env,
-            )
+            ) from e

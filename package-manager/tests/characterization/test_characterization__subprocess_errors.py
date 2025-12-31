@@ -125,10 +125,10 @@ def test_subprocess_permission_error_returns_failure(
     ],
 )
 def test_subprocess_timeout_returns_failure(manager_class, mock_executable):
-    """CHARACTERIZATION: TimeoutExpired propagates to caller.
+    """CHARACTERIZATION: TimeoutExpired is caught and returns InstallResult.
 
-    When a command times out, the exception propagates.
-    Only PackageManagerError is caught.
+    When a command times out, it is caught and converted to InstallResult
+    with success=False. The timeout information is preserved in the error message.
     """
     manager = create_manager(manager_class)
 
@@ -136,9 +136,11 @@ def test_subprocess_timeout_returns_failure(manager_class, mock_executable):
         cmd=["mock", "install", "vim"], timeout=30
     )
     with patch("subprocess.run", side_effect=timeout_error):
-        # FROZEN BEHAVIOR: Exception propagates
-        with pytest.raises(subprocess.TimeoutExpired):
-            manager.install(["vim"])
+        # FROZEN BEHAVIOR: TimeoutExpired is caught and returns failure
+        result = manager.install(["vim"])
+        assert result.success is False
+        assert result.packages_failed == ["vim"]
+        assert "timeout" in result.error_message.lower()
 
 
 @pytest.mark.parametrize(
